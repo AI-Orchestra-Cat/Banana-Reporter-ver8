@@ -1,5 +1,5 @@
-// app_secure.js - v8.0 セキュア版
-// 企業秘密・核心技術をSupabase関数に移行し、F12で露出しないように設計
+// app_integrated.js - v8.0 統合版
+// セキュア版 + 管理者機能 + CSV/メール出力 + スマホ対応
 
 // 設定（config.jsから取得）
 let SUPABASE_URL = '';
@@ -19,7 +19,7 @@ let COLOR_CHART_DATA = [];
 
 // アプリ初期化
 document.addEventListener('DOMContentLoaded', async function() {
-    console.log('🍌 バナナレポーター v8.0 セキュア版 起動');
+    console.log('🍌 バナナレポーター v8.0 統合版 起動');
     
     try {
         // 設定読み込み
@@ -44,6 +44,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         // イベントリスナー設定
         setupEventListeners();
+        
+        // 管理者画面の初期化
+        initAdminPage();
         
         console.log('✅ アプリ初期化完了');
         
@@ -83,7 +86,9 @@ async function loadColorChartData() {
 function initializeUserData() {
     // 店舗データ（ユーザー個別管理）
     let storeData = JSON.parse(localStorage.getItem('storeData')) || {
-        'サンプルチェーン': ['店舗1', '店舗2']
+        'Aチェーン': ['本店', '支店1', '支店2'],
+        'Bストア': ['世田谷店', '渋谷店', '新宿店'],
+        'Cマーケット': ['府中店', '調布店', '国分寺店']
     };
     
     // 商品データ
@@ -93,7 +98,7 @@ function initializeUserData() {
     
     // クレーム種別データ
     let claimTypeData = JSON.parse(localStorage.getItem('claimTypeData')) || [
-        '色調不良', '熟度不良', '傷・打撲'
+        '過熟', 'おされ・きず', '腐れ', '未熟', 'きぶく', 'あおぶく', 'その他'
     ];
     
     // コード名称設定
@@ -121,9 +126,16 @@ function setupEventListeners() {
     // ログインボタン
     document.getElementById('loginBtn')?.addEventListener('click', handleLogin);
     
-    // 画像入力
+    // 画像入力（スマホ対応）
     document.getElementById('cameraBtn')?.addEventListener('click', () => {
-        document.getElementById('cameraInput').click();
+        const cameraInput = document.getElementById('cameraInput');
+        if (cameraInput) {
+            // スマホ対応：capture属性を動的に設定
+            if (isMobileDevice()) {
+                cameraInput.setAttribute('capture', 'environment');
+            }
+            cameraInput.click();
+        }
     });
     
     document.getElementById('fileBtn')?.addEventListener('click', () => {
@@ -135,6 +147,10 @@ function setupEventListeners() {
     
     // 解析ボタン
     document.getElementById('analyzeBtn')?.addEventListener('click', handleAnalyze);
+    
+    // CSV/メール出力ボタン
+    document.getElementById('exportBtn')?.addEventListener('click', exportAnalysisResultCSV);
+    document.getElementById('emailBtn')?.addEventListener('click', sendEmail);
     
     // その他のボタン
     document.getElementById('resetBtn')?.addEventListener('click', resetForm);
@@ -149,6 +165,11 @@ function setupEventListeners() {
     
     // フォーム要素の初期化
     initializeFormElements();
+}
+
+// モバイルデバイス判定
+function isMobileDevice() {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
 // 日付制限設定（未来日付を無効化）
@@ -173,29 +194,49 @@ function displayColorChart() {
     const colorChart = document.getElementById('colorChart');
     if (!colorChart || !COLOR_CHART_DATA.length) return;
     
-    let html = '';
+    colorChart.innerHTML = '';
+    
     COLOR_CHART_DATA.forEach(color => {
-        html += `
-            <div class="color-item" 
-                 data-level="${color.level}" 
-                 style="background-color: ${color.color}; position: relative; cursor: pointer; border-radius: 8px; padding: 15px; margin: 5px; min-height: 60px; display: flex; align-items: center; justify-content: center; border: 2px solid transparent; transition: all 0.3s ease;"
-                 onclick="selectColor(${color.level})">
-                <div style="text-align: center; color: white; font-weight: bold; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">
-                    <div style="font-size: 16px;">カラー${color.level}</div>
-                    ${color.name ? `<div style="font-size: 12px; margin-top: 2px;">${color.name}</div>` : ''}
-                </div>
+        // 円形のカラーアイテム
+        const item = document.createElement('div');
+        item.className = 'color-item';
+        item.dataset.level = color.level;
+        item.style.cssText = `
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background-color: ${color.color};
+            border: 3px solid transparent;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            position: relative;
+        `;
+        
+        item.innerHTML = `
+            <div style="text-align: center; color: white; font-weight: bold; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">
+                <div style="font-size: 14px;">カラー${color.level}</div>
+                ${color.name ? `<div style="font-size: 10px; margin-top: 2px;">${color.name}</div>` : ''}
             </div>
         `;
+        
+        item.onclick = () => selectColor(color.level);
+        
+        colorChart.appendChild(item);
     });
-    colorChart.innerHTML = html;
 }
 
 // カラー選択
-function selectColor(level) {
+window.selectColor = function(level) {
     // 既存の選択をクリア
     document.querySelectorAll('.color-item').forEach(item => {
-        item.style.border = '2px solid transparent';
-        item.style.boxShadow = 'none';
+        item.style.border = '3px solid transparent';
+        item.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
         item.style.transform = 'scale(1)';
     });
     
@@ -203,8 +244,8 @@ function selectColor(level) {
     const selectedItem = document.querySelector(`[data-level="${level}"]`);
     if (selectedItem) {
         selectedItem.style.border = '3px solid #007bff';
-        selectedItem.style.boxShadow = '0 0 0 2px rgba(0, 123, 255, 0.3), 0 2px 8px rgba(0,0,0,0.2)';
-        selectedItem.style.transform = 'scale(1.05)';
+        selectedItem.style.boxShadow = '0 0 10px rgba(0, 123, 255, 0.5), 0 2px 5px rgba(0,0,0,0.3)';
+        selectedItem.style.transform = 'scale(1.1)';
     }
     
     // 選択状態を保存
@@ -260,6 +301,14 @@ async function handleLogin() {
             document.getElementById('authScreen').classList.add('hidden');
             document.getElementById('mainScreen').classList.remove('hidden');
             document.getElementById('currentUserDisplay').textContent = userId;
+            
+            // 管理者の場合は設定ボタンを表示
+            if (currentUser.role === 'admin') {
+                const settingsBtn = document.getElementById('settingsBtn');
+                if (settingsBtn) {
+                    settingsBtn.style.display = 'inline-block';
+                }
+            }
             
             loginError.classList.add('hidden');
             
@@ -411,9 +460,20 @@ async function performClientSideHSVAnalysis(imageData) {
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
                 
-                canvas.width = img.width;
-                canvas.height = img.height;
-                ctx.drawImage(img, 0, 0);
+                // スマホ画像対応：最大サイズを制限
+                const MAX_SIZE = 1000;
+                let width = img.width;
+                let height = img.height;
+                
+                if (width > MAX_SIZE || height > MAX_SIZE) {
+                    const scale = Math.min(MAX_SIZE / width, MAX_SIZE / height);
+                    width = Math.floor(width * scale);
+                    height = Math.floor(height * scale);
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
+                ctx.drawImage(img, 0, 0, width, height);
                 
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 const pixels = imageData.data;
@@ -556,8 +616,8 @@ function enableExportButtons() {
     document.getElementById('emailBtn').disabled = false;
 }
 
-// CSV出力
-function exportAnalysisResultCSV() {
+// CSV出力（完全版）
+window.exportAnalysisResultCSV = function() {
     if (!analysisResult) {
         alert('解析を実行してからCSV出力してください');
         return;
@@ -594,7 +654,18 @@ function exportAnalysisResultCSV() {
         const headers = [...Object.keys(formData), ...Object.keys(analysisData)];
         const values = [...Object.values(formData), ...Object.values(analysisData)];
         
-        const csvContent = '\ufeff' + [headers.join(','), values.join(',')].join('\n');
+        // CSVデータを生成（エスケープ処理付き）
+        const escapeCSV = (val) => {
+            if (typeof val === 'string' && (val.includes(',') || val.includes('"') || val.includes('\n'))) {
+                return `"${val.replace(/"/g, '""')}"`;
+            }
+            return val;
+        };
+        
+        const csvContent = '\ufeff' + [
+            headers.map(escapeCSV).join(','),
+            values.map(escapeCSV).join(',')
+        ].join('\n');
         
         // ダウンロード
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -613,8 +684,8 @@ function exportAnalysisResultCSV() {
     }
 }
 
-// メール送信
-function sendEmail() {
+// メール送信（完全版）
+window.sendEmail = function() {
     if (!analysisResult) {
         alert('解析を実行してからメール送信してください');
         return;
@@ -663,6 +734,68 @@ function incrementMailCount() {
     return count + 1;
 }
 
+// 管理者画面初期化
+function initAdminPage() {
+    // 管理者機能の初期化
+    const adminSettingsSection = document.getElementById('adminSettingsSection');
+    if (adminSettingsSection && currentUser?.role === 'admin') {
+        adminSettingsSection.style.display = 'block';
+        
+        // 管理者用統計表示
+        loadAdminStatistics();
+    }
+}
+
+// 管理者統計情報の読み込み
+async function loadAdminStatistics() {
+    if (currentUser?.role !== 'admin') return;
+    
+    try {
+        // ユーザー管理情報を取得
+        const { data: userStats, error } = await supabaseClient.rpc('get_admin_user_management');
+        
+        if (!error && userStats) {
+            displayAdminStatistics(userStats);
+        }
+    } catch (error) {
+        console.error('管理者統計取得エラー:', error);
+    }
+}
+
+// 管理者統計表示
+function displayAdminStatistics(stats) {
+    const container = document.getElementById('adminStatsContainer');
+    if (!container) return;
+    
+    let html = `
+        <div style="background: #fff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+            <h4>📊 システム利用統計</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+    `;
+    
+    if (Array.isArray(stats)) {
+        stats.forEach(user => {
+            html += `
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #007bff;">
+                    <div style="font-weight: bold; color: #333;">${user.user_id}</div>
+                    <div style="font-size: 14px; color: #6c757d; margin-top: 5px;">
+                        今日: ${user.today_logins || 0}回 / ${user.max_daily_logins || 50}回<br>
+                        今月: ${user.month_logins || 0}回 / ${user.max_monthly_logins || 1000}回<br>
+                        状態: ${user.is_blocked ? '❌ ブロック中' : '✅ アクティブ'}
+                    </div>
+                </div>
+            `;
+        });
+    }
+    
+    html += `
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+}
+
 // フォームリセット
 function resetForm() {
     if (confirm('フォームをリセットしますか？\n入力内容がすべて削除されます。')) {
@@ -686,6 +819,11 @@ function toggleSettings() {
         // 設定画面を表示する場合は、ユーザーデータ管理画面を表示
         if (!settingsPanel.classList.contains('hidden')) {
             displayUserDataManagement();
+            
+            // 管理者の場合は管理者機能も表示
+            if (currentUser?.role === 'admin') {
+                loadAdminStatistics();
+            }
         }
     }
 }
@@ -740,7 +878,7 @@ function displayChainMaster() {
 }
 
 // 新しいチェーン追加
-function addNewChain() {
+window.addNewChain = function() {
     const input = document.getElementById('newChainInput');
     const newChain = input.value.trim();
     
@@ -762,7 +900,7 @@ function addNewChain() {
 }
 
 // チェーン削除
-function removeChain(chainName) {
+window.removeChain = function(chainName) {
     if (confirm(`「${chainName}」を削除しますか？\n関連する店舗も削除されます。`)) {
         delete window.storeData[chainName];
         localStorage.setItem('storeData', JSON.stringify(window.storeData));
@@ -843,7 +981,7 @@ function displayStoreMaster() {
 }
 
 // 新しい店舗追加
-function addNewStore() {
+window.addNewStore = function() {
     const chainSelect = document.getElementById('storeChainSelect');
     const storeInput = document.getElementById('newStoreInput');
     const selectedChain = chainSelect.value;
@@ -877,7 +1015,7 @@ function addNewStore() {
 }
 
 // 店舗削除
-function removeStore(chainName, storeName) {
+window.removeStore = function(chainName, storeName) {
     if (confirm(`「${storeName}」を削除しますか？`)) {
         window.storeData[chainName] = window.storeData[chainName].filter(store => store !== storeName);
         localStorage.setItem('storeData', JSON.stringify(window.storeData));
@@ -942,7 +1080,7 @@ function displayProductMaster() {
 }
 
 // 新しい商品追加
-function addNewProduct() {
+window.addNewProduct = function() {
     const input = document.getElementById('newProductInput');
     const newProduct = input.value.trim();
     
@@ -964,7 +1102,7 @@ function addNewProduct() {
 }
 
 // 商品削除
-function removeProduct(productName) {
+window.removeProduct = function(productName) {
     if (confirm(`「${productName}」を削除しますか？`)) {
         window.productData = window.productData.filter(product => product !== productName);
         localStorage.setItem('productData', JSON.stringify(window.productData));
@@ -1028,7 +1166,7 @@ function displayClaimTypeMaster() {
 }
 
 // 新しいクレーム種別追加
-function addNewClaimType() {
+window.addNewClaimType = function() {
     const input = document.getElementById('newClaimTypeInput');
     const newClaimType = input.value.trim();
     
@@ -1050,7 +1188,7 @@ function addNewClaimType() {
 }
 
 // クレーム種別削除
-function removeClaimType(claimType) {
+window.removeClaimType = function(claimType) {
     if (confirm(`「${claimType}」を削除しますか？`)) {
         window.claimTypeData = window.claimTypeData.filter(type => type !== claimType);
         localStorage.setItem('claimTypeData', JSON.stringify(window.claimTypeData));
@@ -1082,15 +1220,19 @@ function updateClaimTypeOptions() {
 // コード名称管理表示
 function displayCodeNameManagement() {
     // 既にHTMLに実装済みのため、現在の値で初期化
-    document.getElementById('code1Name').value = window.codeNames.code1 || 'コード1';
-    document.getElementById('code2Name').value = window.codeNames.code2 || 'コード2';
-    document.getElementById('code3Name').value = window.codeNames.code3 || 'コード3';
+    const code1NameInput = document.getElementById('code1Name');
+    const code2NameInput = document.getElementById('code2Name');
+    const code3NameInput = document.getElementById('code3Name');
+    
+    if (code1NameInput) code1NameInput.value = window.codeNames.code1 || 'コード1';
+    if (code2NameInput) code2NameInput.value = window.codeNames.code2 || 'コード2';
+    if (code3NameInput) code3NameInput.value = window.codeNames.code3 || 'コード3';
     
     updateCodeLabels();
 }
 
 // コード名称更新
-function updateCodeName(codeNumber) {
+window.updateCodeName = function(codeNumber) {
     const nameInput = document.getElementById(`code${codeNumber}Name`);
     if (nameInput) {
         const newName = nameInput.value.trim() || `コード${codeNumber}`;
@@ -1100,7 +1242,7 @@ function updateCodeName(codeNumber) {
 }
 
 // コード名称保存
-function saveCodeNames() {
+window.saveCodeNames = function() {
     try {
         localStorage.setItem('bananaCodeNames', JSON.stringify(window.codeNames));
         updateCodeLabels();
@@ -1161,7 +1303,7 @@ function handleLogout() {
 }
 
 // マスタデータセクション開閉
-function toggleMasterDataSection() {
+window.toggleMasterDataSection = function() {
     const content = document.getElementById('masterDataContent');
     const icon = document.getElementById('masterDataToggleIcon');
     
@@ -1177,8 +1319,9 @@ function toggleMasterDataSection() {
 }
 
 // 🔒 セキュリティ注意：以下の機能はSupabaseに移行済みのためコメントアウト
-// COLOR_SETTINGS, COLOR_JUDGMENT_RULES, BANANA_COLOR_RRANGESの管理機能は
+// COLOR_SETTINGS, COLOR_JUDGMENT_RULES, BANANA_COLOR_RANGESの管理機能は
 // 企業秘密保護のため、Supabase関数として実装済み
 
-console.log('🔒 バナナレポーター v8.0 セキュア版 読み込み完了');
+console.log('🔒 バナナレポーター v8.0 統合版 読み込み完了');
 console.log('⚡ 核心技術はSupabase関数で保護されています');
+console.log('✅ 管理者機能・CSV/メール出力・スマホ対応を統合');
